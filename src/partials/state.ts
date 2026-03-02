@@ -3,6 +3,7 @@ import {derived, writable, get} from "svelte/store"
 import {fromPairs} from "@welshman/lib"
 import {synced, localStorageProvider} from "@welshman/store"
 import {parseHex} from "src/util/html"
+import {THEMES, isDarkTheme, type ThemeName} from "src/partials/themes"
 
 // Browser
 
@@ -26,38 +27,42 @@ export const installAsPWA = () => {
 
 // Themes
 
-const parseTheme = raw =>
-  fromPairs(raw.split(",").map((x: string) => x.split(":"))) as Record<string, string>
-
-const DARK_THEME = parseTheme(import.meta.env.VITE_DARK_THEME)
-
-const LIGHT_THEME = parseTheme(import.meta.env.VITE_LIGHT_THEME)
-
-export const theme = synced({
+export const theme = synced<ThemeName>({
   key: "ui/theme",
-  defaultValue: "dark",
+  defaultValue: "ios-dark",
   storage: localStorageProvider,
 })
 
 theme.subscribe(value => {
-  if (value === "dark") {
+  if (isDarkTheme(value)) {
     document.documentElement.classList.add("dark")
   } else {
     document.documentElement.classList.remove("dark")
   }
+  document.documentElement.setAttribute("data-theme", value)
 })
 
-export const toggleTheme = () => theme.update(t => (t === "dark" ? "light" : "dark"))
+export const toggleTheme = () =>
+  theme.update(t => (isDarkTheme(t) ? "ios-light" : "ios-dark"))
 
-export const themeColors = derived(theme, $theme =>
-  fromPairs(
-    Object.entries($theme === "dark" ? DARK_THEME : LIGHT_THEME).flatMap(([k, v]) => [
-      [k, v],
-      [`${k}-l`, adjustBrightness(v, 10)],
-      [`${k}-d`, adjustBrightness(v, -10)],
-    ]),
-  ),
-)
+export const setTheme = (name: ThemeName) => theme.set(name)
+
+export const themeColors = derived(theme, $theme => {
+  const colors = THEMES[$theme] ?? THEMES["ios-dark"]
+  return fromPairs(
+    Object.entries(colors).flatMap(([k, v]) => {
+      // 不对特殊 surface 变量做亮度调整
+      if (k.startsWith("bubble-") || k.startsWith("surface")) {
+        return [[k, v]]
+      }
+      return [
+        [k, v],
+        [`${k}-l`, adjustBrightness(v, 10)],
+        [`${k}-d`, adjustBrightness(v, -10)],
+      ]
+    }),
+  )
+})
 
 export const themeVariables = derived(themeColors, $colors =>
   Object.entries($colors)

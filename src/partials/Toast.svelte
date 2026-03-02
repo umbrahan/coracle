@@ -31,6 +31,8 @@
 
   export const showWarning = (message, opts = {}) => showToast({message, theme: "warning", ...opts})
 
+  export const showError = (message, opts = {}) => showToast({message, theme: "danger", ...opts})
+
   export const showPublishInfo = (thunk: Thunk, opts = {}) =>
     showToast({thunk, type: "publish", ...opts})
 

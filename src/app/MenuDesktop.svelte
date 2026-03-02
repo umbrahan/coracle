@@ -12,6 +12,7 @@
     thunkIsComplete,
   } from "@welshman/app"
   import {toggleTheme, theme} from "src/partials/state"
+  import {isDarkTheme} from "src/partials/themes"
   import MenuItem from "src/partials/MenuItem.svelte"
   import FlexColumn from "src/partials/FlexColumn.svelte"
   import Link from "src/partials/Link.svelte"
@@ -78,7 +79,7 @@
   <Link external class="mb-4 mt-4 flex items-center gap-2 px-6" href="https://info.coracle.social">
     <img
       alt="App Logo"
-      src={$theme === "dark"
+      src={isDarkTheme($theme)
         ? import.meta.env.VITE_APP_WORDMARK_DARK
         : import.meta.env.VITE_APP_WORDMARK_LIGHT} />
   </Link>

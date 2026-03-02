@@ -11,9 +11,52 @@ import {svelte} from "@sveltejs/vite-plugin-svelte"
 dotenv.config({path: ".env"})
 dotenv.config({path: ".env.template"})
 
-const accentColor = process.env.VITE_LIGHT_THEME.match(/accent:(#\w+)/)[1]
+// ── Widget / library build ────────────────────────────────────────────────────
+// Run with:  VITE_BUILD_WIDGET=true pnpm build
+//            pnpm build:widget   (shortcut in package.json)
+//
+// Output: dist/widget/coracle-chat.js       (ESM)
+//         dist/widget/coracle-chat.iife.js  (IIFE, for <script> tag)
+// ─────────────────────────────────────────────────────────────────────────────
+const isWidgetBuild = process.env.VITE_BUILD_WIDGET === "true"
+
+const accentColor = (process.env.VITE_LIGHT_THEME ?? "").match(/accent:(#\w+)/)?.[1] ?? "#007aff"
 
 export default defineConfig(async () => {
+  // Skip heavy favicons generation in widget builds
+  if (isWidgetBuild) {
+    return {
+      resolve: {
+        alias: { src: path.resolve(__dirname, "src") },
+      },
+      build: {
+        outDir: "dist/widget",
+        lib: {
+          entry: path.resolve(__dirname, "src/widget/index.ts"),
+          name: "CoracleChat",
+          formats: ["es", "iife"],
+          fileName: fmt => `coracle-chat.${fmt === "es" ? "" : fmt + "."}js`,
+        },
+        rollupOptions: {
+          // Keep welshman as external in ESM to reduce bundle size.
+          // IIFE builds bundle everything for standalone <script> use.
+          external: fmt => fmt === "es"
+            ? id => id.startsWith("@welshman") || id.startsWith("nostr-tools")
+            : false,
+        },
+      },
+      plugins: [
+        svelte({
+          preprocess: sveltePreprocess(),
+          compilerOptions: {
+            customElement: true,   // compile <svelte:options customElement> properly
+          },
+          onwarn: (w, h) => { if (!w.code.startsWith("a11y-")) h(w) },
+        }),
+      ],
+    }
+  }
+
   const icons = await favicons("public" + process.env.VITE_APP_LOGO)
 
   if (!fs.existsSync("public/icons")) fs.mkdirSync("public/icons")
