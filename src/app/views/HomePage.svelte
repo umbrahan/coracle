@@ -15,6 +15,14 @@
   let searchQuery = ""
   let showThemePicker = false
 
+  // ── Unread count helpers ───────────────────────────────────────────────────
+  // 每个 peer 的「最后已读时间戳」存在 localStorage 中
+  // key: `chat_last_seen_${myPubkey}_${peerPubkey}`  value: unix seconds string
+  function getLastSeen(myPubkey: string, peerPubkey: string): number {
+    const v = localStorage.getItem(`chat_last_seen_${myPubkey}_${peerPubkey}`)
+    return v ? parseInt(v, 10) : 0
+  }
+
   // ── Conversation list ─────────────────────────────────────────────────────
   // 查询所有 DM 并聚合为「每个联系人的最新消息」
   $: followsArray = ($userFollowList?.publicTags || []).map(t => t[1])
@@ -38,12 +46,13 @@
     // 从 repository 查询双方的 DM
     const events = repository.query([{kinds: [DIRECT_MESSAGE]}])
 
-    // 聚合为 Map<peerPubkey, latestEvent>
-    const map = new Map<string, {ts: number; preview: string}>()
+    // 聚合为 Map<peerPubkey, {ts, preview, unread}>
+    const map = new Map<string, {ts: number; preview: string; unread: number}>()
 
     for (const ev of events) {
       const recipients = ev.tags.filter(t => t[0] === "p").map(t => t[1])
       let peer: string | null = null
+      const isIncoming = ev.pubkey !== myPubkey
 
       if (ev.pubkey === myPubkey) {
         peer = recipients[0] ?? null
@@ -54,20 +63,36 @@
       if (!peer) continue
 
       const existing = map.get(peer)
-      if (!existing || ev.created_at > existing.ts) {
-        map.set(peer, {ts: ev.created_at, preview: ev.content})
+      const lastSeen = getLastSeen(myPubkey, peer)
+      // 仅统计别人发来的、且比「最后已读」更新的消息
+      const isUnread = isIncoming && ev.created_at > lastSeen
+
+      if (!existing) {
+        map.set(peer, {ts: ev.created_at, preview: ev.content, unread: isUnread ? 1 : 0})
+      } else {
+        map.set(peer, {
+          ts: Math.max(existing.ts, ev.created_at),
+          preview: ev.created_at >= existing.ts ? ev.content : existing.preview,
+          unread: existing.unread + (isUnread ? 1 : 0),
+        })
       }
     }
 
     // 合并 follows（即使没有消息记录也显示）
     for (const f of followList) {
-      if (!map.has(f)) map.set(f, {ts: 0, preview: ""})
+      if (!map.has(f)) map.set(f, {ts: 0, preview: "", unread: 0})
     }
 
     // 按时间倒序排列
     return Array.from(map.entries())
-      .map(([pubkey, {ts, preview}]) => ({pubkey, ts, preview}))
+      .map(([pubkey, {ts, preview, unread}]) => ({pubkey, ts, preview, unread}))
       .sort((a, b) => b.ts - a.ts)
+  }
+
+  // 打开聊天时更新 lastSeen（标记已读）
+  function markAllRead(myPubkey: string, peerPubkey: string) {
+    const now = Math.floor(Date.now() / 1000)
+    localStorage.setItem(`chat_last_seen_${myPubkey}_${peerPubkey}`, String(now))
   }
 
   function formatTs(ts: number): string {
@@ -82,8 +107,12 @@
   }
 
   const openChat = (pk: string) => {
-    router.at("/chat/:targetPubkey").qp({pubkey: pk}).push()
+    if ($pubkey) markAllRead($pubkey, pk)
+    router.at(`/chat/${pk}`).push()
   }
+
+  // 总未读数（用于底部导航 badge）
+  $: totalUnread = conversations.reduce((sum, c) => sum + c.unread, 0)
 
   const themeNames = Object.keys(THEME_LABELS) as ThemeName[]
 </script>
@@ -226,19 +255,26 @@
           <div class="conv-body">
             <div class="conv-top">
               <span class="conv-name">{name}</span>
-              {#if conv.ts}
-                <span class="conv-time">{formatTs(conv.ts)}</span>
+              <div class="conv-top-right">
+                {#if conv.ts}
+                  <span class="conv-time" class:unread-time={conv.unread > 0}>{formatTs(conv.ts)}</span>
+                {/if}
+              </div>
+            </div>
+            <div class="conv-bottom-row">
+              {#if conv.preview}
+                <div class="conv-preview">
+                  <span class="preview-text">{conv.preview.slice(0, 60)}{conv.preview.length > 60 ? "…" : ""}</span>
+                </div>
+              {:else}
+                <div class="conv-preview">
+                  <span class="preview-muted">点击开始聊天</span>
+                </div>
+              {/if}
+              {#if conv.unread > 0}
+                <span class="unread-badge">{conv.unread > 99 ? "99+" : conv.unread}</span>
               {/if}
             </div>
-            {#if conv.preview}
-              <div class="conv-preview">
-                <span class="preview-text">🔒 加密消息</span>
-              </div>
-            {:else}
-              <div class="conv-preview">
-                <span class="preview-muted">点击开始聊天</span>
-              </div>
-            {/if}
           </div>
           <svg class="conv-chevron" width="8" height="14" viewBox="0 0 8 14" fill="none">
             <path d="M1 1l6 6-6 6" stroke="currentColor" stroke-width="1.8"
@@ -252,9 +288,14 @@
   <!-- ── Bottom Nav ─────────────────────────────────────────────── -->
   <nav class="bottom-nav">
     <button class="nav-tab active" on:click={() => router.at("/").push()}>
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-      </svg>
+      <div class="nav-icon-wrap">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        {#if totalUnread > 0}
+          <span class="nav-badge">{totalUnread > 99 ? "99+" : totalUnread}</span>
+        {/if}
+      </div>
       <span>消息</span>
     </button>
     <button class="nav-tab" on:click={() => router.at("/contacts").push()}>
@@ -522,6 +563,75 @@
   .preview-muted { color: var(--neutral-600); }
 
   .conv-chevron { color: var(--neutral-600); flex-shrink: 0; }
+
+  /* ── Unread badge ─────────────────────────────────────────── */
+  .conv-bottom-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .conv-bottom-row .conv-preview {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .unread-badge {
+    flex-shrink: 0;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+  }
+
+  .conv-top-right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .unread-time {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  /* Bottom nav badge */
+  .nav-icon-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .nav-badge {
+    position: absolute;
+    top: -6px;
+    right: -8px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    border: 1.5px solid var(--surface-overlay, var(--neutral-800));
+  }
 
   /* ── Empty state ─────────────────────────────────────────── */
   .empty-state {

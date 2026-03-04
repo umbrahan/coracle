@@ -50,18 +50,17 @@
   <div
     id="page"
     class={cx(
-      "m-sai scroll-container relative overflow-auto pb-32 text-neutral-100 lg:pl-72 lg:pt-16",
+      "relative text-neutral-100",
       {
         "pointer-events-none": $menuIsOpen,
       },
-    )}>
+    )}
+    style="height: 100dvh; display: flex; flex-direction: column;">
     {#if $page}
       {@const {component} = router.getMatch($page.path).route}
       {#key router.getKey($page)}
-        <div class="m-auto w-full max-w-2xl">
-          <div class="flex max-w-2xl flex-grow flex-col gap-4 p-4">
-            <svelte:component this={component} {...router.getProps($page)} />
-          </div>
+        <div style="flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;">
+          <svelte:component this={component} {...router.getProps($page)} />
         </div>
       {/key}
     {/if}

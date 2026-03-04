@@ -2,14 +2,23 @@
 // 处理完整身份切换流程，包括清理内存和断开连接
 
 import {get} from "svelte/store"
-import {pubkey, sessions, loginWithNip01} from "@welshman/app"
+import {pubkey, sessions, loginWithNip01, publishThunk} from "@welshman/app"
 import {repository} from "@welshman/app"
 import {Pool} from "@welshman/net"
 import {Nip01Signer} from "@welshman/signer"
+import {makeEvent, PROFILE} from "@welshman/util"
 import {deleteDB} from "idb"
 import type {IdentityMeta} from "./types"
 import {identityManager} from "./manager"
 import * as Storage from "./storage"
+
+// 默认 relay 列表，用于发布 profile 等元数据
+const getDefaultRelays = () =>
+  (import.meta.env.VITE_DEFAULT_RELAYS || "relay.damus.io,nos.lol")
+    .split(",")
+    .map((r: string) => r.trim())
+    .filter(Boolean)
+    .map((r: string) => (r.startsWith("wss://") || r.startsWith("ws://") ? r : `wss://${r}`))
 
 // 重新导出主要类型
 export type {IdentityMeta} from "./types"
@@ -252,6 +261,21 @@ export class IdentitySwitcher {
 
       // 设为当前身份
       identityManager.updateLastUsed(newPubkey)
+
+      // 自动登录：让 @welshman/app 建立 session，这样 $pubkey 就会立即更新
+      loginWithNip01(privateKey)
+
+      // 发布 kind 0 profile 事件，使昵称在 profilesByPubkey 中可见
+      if (name) {
+        const relays = getDefaultRelays()
+        const profileEvent = makeEvent(PROFILE, {
+          content: JSON.stringify({name, display_name: name}),
+        })
+        // 稍等确保 signer 已激活，再签名发布
+        setTimeout(() => {
+          publishThunk({event: profileEvent, relays})
+        }, 200)
+      }
 
       return meta
     } catch (error) {

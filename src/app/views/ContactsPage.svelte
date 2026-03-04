@@ -296,7 +296,7 @@
 
   // 打开聊天
   function openChat(contactPubkey: string) {
-    router.at("/chat/:pubkey").qp({pubkey: contactPubkey}).push()
+    router.at(`/chat/${contactPubkey}`).push()
   }
 
   // 查看个人资料

@@ -3,7 +3,6 @@ import dotenv from "dotenv"
 import * as path from "path"
 import {defineConfig} from "vite"
 import {VitePWA} from "vite-plugin-pwa"
-import {favicons} from "favicons"
 import htmlPlugin from "vite-plugin-html-config"
 import sveltePreprocess from "svelte-preprocess"
 import {svelte} from "@sveltejs/vite-plugin-svelte"
@@ -22,7 +21,7 @@ const isWidgetBuild = process.env.VITE_BUILD_WIDGET === "true"
 
 const accentColor = (process.env.VITE_LIGHT_THEME ?? "").match(/accent:(#\w+)/)?.[1] ?? "#007aff"
 
-export default defineConfig(async () => {
+export default defineConfig(async ({command}) => {
   // Skip heavy favicons generation in widget builds
   if (isWidgetBuild) {
     return {
@@ -57,7 +56,10 @@ export default defineConfig(async () => {
     }
   }
 
-  const icons = await favicons("public" + process.env.VITE_APP_LOGO)
+  // Skip favicons generation in dev mode (requires sharp native module)
+  const icons = command === "serve"
+    ? {images: []}
+    : await (await import("favicons")).favicons("public" + process.env.VITE_APP_LOGO)
 
   if (!fs.existsSync("public/icons")) fs.mkdirSync("public/icons")
 
@@ -66,6 +68,8 @@ export default defineConfig(async () => {
   }
 
   return {
+    // Use a local (Linux) path for caching to avoid Mac FUSE filesystem permission issues
+    cacheDir: "/tmp/vite-cache-coracle",
     server: {
       https: false,
     },

@@ -47,11 +47,12 @@
       const password = Math.random().toString(36).slice(-10)
       await identitySwitcher.addIdentity(secretKey, password, name)
 
-      showInfo("Identity created! Please save your password: " + password)
+      showInfo("Identity created!")
 
+      // addIdentity 内部已调用 loginWithNip01，$pubkey 立即更新，直接跳首页
       setTimeout(() => {
-        window.location.reload()
-      }, 2000)
+        router.at("/").push()
+      }, 800)
     } catch (error: unknown) {
       console.error("Failed to create identity:", error)
       const message = error instanceof Error ? error.message : "Unknown error"

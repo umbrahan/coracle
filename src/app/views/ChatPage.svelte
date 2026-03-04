@@ -1,14 +1,14 @@
 <script lang="ts">
   import {onMount, onDestroy, tick} from "svelte"
-  import {pubkey, signer, repository, profilesByPubkey} from "@welshman/app"
+  import {pubkey, signer, repository, profilesByPubkey, shouldUnwrap, wrapManager} from "@welshman/app"
   import {makeEvent, DIRECT_MESSAGE} from "@welshman/util"
   import {publishThunk} from "@welshman/app"
-  import {decrypt as signerDecrypt} from "@welshman/signer"
   import * as nip19 from "nostr-tools/nip19"
   import {get} from "svelte/store"
   import {router} from "src/app/util/router"
   import PersonCircle from "src/app/shared/PersonCircle.svelte"
   import {getChatRelays} from "src/engine/utils/relay-policy"
+  import {listenForMessages} from "src/engine"
   import {MessageTTLManager} from "src/engine/utils/message-ttl"
   import type {TrustedEvent} from "@welshman/util"
 
@@ -19,7 +19,8 @@
   let chatRelays: string[] = []
   let messages: TrustedEvent[] = []
   let ttlManager: MessageTTLManager
-  let subscription: any = null
+  let stopListening: (() => void) | null = null
+  let onWrapAdd: (() => void) | null = null
   let messagesEl: HTMLElement
   let textareaEl: HTMLTextAreaElement
 
@@ -31,10 +32,13 @@
     ttlManager = new MessageTTLManager(1000)
     ttlManager.start()
 
+    // Enable NIP-59 unwrapping so incoming gift-wrapped messages are decrypted
+    shouldUnwrap.set(true)
+
     const relaySet = getChatRelays()
     chatRelays = relaySet.urls
 
-    await subscribeToMessages()
+    subscribeToMessages()
 
     ttlManager.onExpired(event => {
       messages = messages.filter(m => m.id !== event.id)
@@ -45,59 +49,48 @@
   })
 
   onDestroy(() => {
-    subscription?.stop()
+    stopListening?.()
     ttlManager?.stop()
+    if (onWrapAdd) wrapManager.off("add", onWrapAdd)
   })
 
-  async function subscribeToMessages() {
-    const {SimplePool} = await import("nostr-tools/pool")
-    const pool = new SimplePool()
+  function isRelevantMessage(event: TrustedEvent, currentPubkey: string): boolean {
+    const recipients = event.tags.filter(t => t[0] === "p").map(t => t[1])
+    return (
+      (event.pubkey === currentPubkey && recipients.includes(targetPubkey)) ||
+      (event.pubkey === targetPubkey && recipients.includes(currentPubkey))
+    )
+  }
+
+  function refreshFromRepo(currentPubkey: string) {
+    const history = repository.query([{kinds: [DIRECT_MESSAGE], authors: [currentPubkey, targetPubkey]}])
+    const chatHistory = history.filter(e => isRelevantMessage(e, currentPubkey))
+    chatHistory.forEach(msg => ttlManager.add(msg))
+    messages = ttlManager.getValidMessages().sort((a, b) => a.created_at - b.created_at)
+    tick().then(() => scrollToBottom())
+  }
+
+  function subscribeToMessages() {
     const currentPubkey = get(pubkey)
     if (!currentPubkey || !targetPubkey) return
 
-    const authors = [currentPubkey, targetPubkey]
-    const kinds = [DIRECT_MESSAGE]
-    const relays = getChatRelays().urls
+    // Load existing messages from repository (already unwrapped rumore stored by wrapManager)
+    refreshFromRepo(currentPubkey)
 
-    const history = repository.query([{kinds, authors}])
-    const chatHistory = history.filter(event => {
-      const recipients = event.tags.filter(t => t[0] === "p").map(t => t[1])
-      return (
-        (event.pubkey === currentPubkey && recipients.includes(targetPubkey)) ||
-        (event.pubkey === targetPubkey && recipients.includes(currentPubkey))
-      )
-    })
+    // Listen for newly unwrapped messages via wrapManager
+    // wrapManager.add fires after unwrapAndStore stores the kind 14 rumor in the repository
+    onWrapAdd = () => refreshFromRepo(currentPubkey)
+    wrapManager.on("add", onWrapAdd)
 
-    chatHistory.forEach(msg => ttlManager.add(msg))
-    messages = ttlManager.getValidMessages().sort((a, b) => a.created_at - b.created_at)
-
-    subscription = pool.subscribe(relays, {kinds, authors}, {
-      onevent(event) {
-        const recipients = event.tags.filter(t => t[0] === "p").map(t => t[1])
-        if (
-          (event.pubkey === currentPubkey && recipients.includes(targetPubkey)) ||
-          (event.pubkey === targetPubkey && recipients.includes(currentPubkey))
-        ) {
-          ttlManager.add(event)
-          messages = ttlManager.getValidMessages().sort((a, b) => a.created_at - b.created_at)
-          tick().then(() => scrollToBottom())
-        }
-      },
-    })
+    // Open a persistent relay subscription for kind 1059 (WRAP) events addressed to us.
+    // listenForMessages uses the welshman Pool whose global socket listener calls
+    // unwrapAndStore automatically for each WRAP event received.
+    stopListening = listenForMessages()
   }
 
   async function decryptMessage(event: TrustedEvent): Promise<string> {
-    try {
-      const $signerInstance = get(signer)
-      if (!$signerInstance) return "…"
-      const currentPubkey = get(pubkey)
-      const decryptPubkey =
-        event.pubkey === currentPubkey ? targetPubkey : event.pubkey
-      // signerDecrypt auto-detects NIP-04 vs NIP-44 based on content format
-      return await signerDecrypt($signerInstance, decryptPubkey, event.content)
-    } catch {
-      return "⚠ 无法解密"
-    }
+    // NIP-17 (kind 14): content is plaintext after gift-wrap unwrapping
+    return event.content
   }
 
   function formatTime(timestamp: number): string {
@@ -124,21 +117,17 @@
     resizeTextarea()
 
     try {
-      // Use NIP-44 encryption (more secure); decryptMessage falls back to NIP-04 for old messages
-      const encryptedContent = await get(signer).nip44.encrypt(targetPubkey, content)
+      // NIP-17: kind 14 content is plaintext; publishThunk with recipient handles NIP-59 gift-wrap
       const event = makeEvent(DIRECT_MESSAGE, {
-        content: encryptedContent,
+        content,
         tags: [
           ["p", targetPubkey],
           ["expiration", String(Math.floor(Date.now() / 1000) + 86400 * 7)],
         ],
       })
 
-      await publishThunk({event, relays: chatRelays})
-      ttlManager.add({...event, pubkey: get(pubkey)} as TrustedEvent)
-      messages = ttlManager.getValidMessages().sort((a, b) => a.created_at - b.created_at)
-      await tick()
-      scrollToBottom()
+      // publishThunk starts gift-wrapping async; wrapManager.on("add") will refresh messages
+      publishThunk({event, relays: chatRelays, recipient: targetPubkey})
     } catch (err) {
       console.error("Failed to send:", err)
       messageInput = content

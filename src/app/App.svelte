@@ -159,6 +159,18 @@
     // before loading app data
     await sleep(350)
 
+    // Per-tab identity isolation: each tab can be independently logged in
+    // as a different user by storing the desired pubkey in sessionStorage.
+    // Usage: sessionStorage.setItem('tab_pubkey', '<hex_pubkey>'); location.reload()
+    const tabPubkey = sessionStorage.getItem('tab_pubkey')
+    if (tabPubkey && tabPubkey !== get(app.pubkey)) {
+      const tabSession = get(app.sessions)[tabPubkey]
+      if (tabSession?.method === 'nip01' && tabSession?.secret) {
+        app.loginWithNip01(tabSession.secret)
+        await sleep(100)
+      }
+    }
+
     if ($session) {
       loadUserData()
     }
@@ -171,9 +183,6 @@
   <div class="text-tinted-200">
     <Routes />
     {#key $pubkey}
-      <ForegroundButtons />
-      <Nav />
-      <Menu />
       <Toast />
     {/key}
   </div>
