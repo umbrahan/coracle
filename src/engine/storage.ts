@@ -349,3 +349,36 @@ export class EventsStorageAdapter {
     return () => this.options.repository.off("update", onUpdate)
   }
 }
+
+/**
+ * NoopEventsStorageAdapter - 禁用事件持久化的适配器
+ *
+ * 用于内存订阅流场景，不将事件持久化到 IndexedDB
+ * 所有事件仅保存在内存中，应用关闭后清空
+ */
+export type NoopEventsStorageAdapterOptions = {
+  name?: string
+  repository?: Repository
+}
+
+export class NoopEventsStorageAdapter {
+  keyPath = "id"
+
+  constructor(readonly options: NoopEventsStorageAdapterOptions = {}) {}
+
+  /**
+   * 初始化 - 空操作
+   * 不加载任何持久化的事件
+   */
+  async init() {
+    console.log("NoopEventsStorageAdapter: 禁用事件持久化")
+  }
+
+  /**
+   * 同步 - 返回空取消函数
+   * 不监听 repository 更新，不保存任何事件
+   */
+  sync() {
+    return () => {}
+  }
+}

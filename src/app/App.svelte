@@ -79,6 +79,11 @@
   import UserProfile from "src/app/views/UserProfile.svelte"
   import UserSettings from "src/app/views/UserSettings.svelte"
   import Zap from "src/app/views/Zap.svelte"
+  import PostsPage from "src/app/views/PostsPage.svelte"
+  import ChatsPage from "src/app/views/ChatsPage.svelte"
+  import ContactsPage from "src/app/views/ContactsPage.svelte"
+  import SettingsPage from "src/app/views/SettingsPage.svelte"
+  import BottomNav from "src/app/layout/Skeleton/BottomNav.svelte"
   import {onMount} from "svelte"
   import {logUsage} from "src/app/state"
   import {
@@ -102,16 +107,14 @@
   router.register("/about", About)
   router.register("/search", Search)
 
-  router.register("/channels", ChannelsList, {
-    requireSigner: true,
-  })
+  // Channel-related routes (kept for compatibility)
   router.register("/channels/enable", ChatEnable, {
     requireSigner: true,
   })
   router.register("/channels/create", ChannelCreate, {
     requireSigner: true,
   })
-  router.register("/channels/requests", ChannelsList, {
+  router.register("/channels/requests", ChatsPage, {
     requireSigner: true,
   })
   router.register("/channels/:channelId", ChannelsDetail, {
@@ -179,7 +182,16 @@
     },
   })
 
-  router.register("/", Home)
+  // Main bottom nav routes
+  router.register("/", PostsPage)
+  router.register("/posts", PostsPage)
+  router.register("/channels", ChatsPage, {
+    requireSigner: true,
+  })
+  router.register("/people/list", ContactsPage)
+  router.register("/settings", SettingsPage, {
+    requireUser: true,
+  })
   router.register("/topics/:topic", Home)
   router.register("/notes", Home)
   router.register("/notes/create", NoteCreate, {
@@ -448,6 +460,7 @@
       <Nav />
       <Menu />
       <Toast />
+      <BottomNav />
     {/key}
   </div>
 {/await}

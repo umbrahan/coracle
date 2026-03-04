@@ -132,6 +132,7 @@ import {
   TrackerStorageAdapter,
   WrapManagerStorageAdapter,
   EventsStorageAdapter,
+  NoopEventsStorageAdapter,
   initStorage,
 } from "src/engine/storage"
 import {SearchHelper, fromCsv, parseJson, ensureProto} from "src/util/misc"
@@ -850,23 +851,13 @@ if (!initialized) {
     plaintext: new PlaintextStorageAdapter({name: "plaintext"}),
     tracker: new TrackerStorageAdapter({name: "tracker", tracker}),
     wraps: new WrapManagerStorageAdapter({name: "wraps", wrapManager}),
-    events: new EventsStorageAdapter({
-      repository,
-      name: "events",
-      limit: 10_000,
-      rankEvent: (e: TrustedEvent) => {
-        const $sessions = sessions.get()
-        const metaKinds = [PROFILE, FOLLOWS, MUTES, RELAYS, MESSAGING_RELAYS]
-
-        if ($sessions[e.pubkey] || e.tags.some(t => $sessions[t[1]])) return 1
-        if (metaKinds.includes(e.kind) && userFollows.get()?.has(e.pubkey)) return 1
-
-        return 0
-      },
-    }),
+    events: new NoopEventsStorageAdapter({repository}),
   })
 
   ready.then(() => Promise.all(initialRelays.map(url => loadRelay(url))))
 }
 
 export {ready}
+
+// 身份管理模块导出
+export * from "src/engine/identity"
